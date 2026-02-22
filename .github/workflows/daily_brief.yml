@@ -1,0 +1,29 @@
+name: Daily AI Digest
+
+on:
+  schedule:
+    - cron: '0 3 * * *'   # 每天 11:00 AM CST（UTC+8 → UTC 03:00）
+  workflow_dispatch:        # 支持手动触发测试
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: pip install requests
+
+      - name: Run Daily AI Digest
+        run: python scripts/daily_brief.py
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}           # Actions 自动注入，无需手动添加
+          FEISHU_WEBHOOK_URL: ${{ secrets.FEISHU_WEBHOOK_URL }}
+          FEISHU_SECRET: ${{ secrets.FEISHU_SECRET }}         # 可选，飞书安全模式签名校验
+          MEM0_API_KEY: ${{ secrets.MEM0_API_KEY }}
