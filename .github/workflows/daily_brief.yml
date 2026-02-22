@@ -27,3 +27,4 @@ jobs:
           FEISHU_WEBHOOK_URL: ${{ secrets.FEISHU_WEBHOOK_URL }}
           FEISHU_SECRET: ${{ secrets.FEISHU_SECRET }}         # 可选，飞书安全模式签名校验
           MEM0_API_KEY: ${{ secrets.MEM0_API_KEY }}
+          NOTION_API_KEY: ${{ secrets.NOTION_API_KEY }}       # L3: Notion 数据库写入

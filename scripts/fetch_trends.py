@@ -107,10 +107,12 @@ def main():
         sys.exit(1)
 
     if args.json:
+        fetched_at = datetime.now(timezone.utc).isoformat()   # L1: 可审计时间戳
         json.dump([{
             "rank": i, "name": r["full_name"], "url": r["html_url"],
             "stars": r["stargazers_count"], "forks": r.get("forks_count", 0),
             "language": r.get("language"), "description": r.get("description"),
+            "fetched_at": fetched_at,   # L1: 每条记录带抓取时间
         } for i, r in enumerate(repos, 1)], sys.stdout, ensure_ascii=False, indent=2)
     else:
         print(format_output(repos, args.period))
