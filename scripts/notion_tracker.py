@@ -134,25 +134,31 @@ def add_repo_row(db_id: str, repo: dict, run_id: str = "") -> bool:
 def log_top_repos(repos: list, top_n: int = 3, run_id: str = "") -> bool:
     """
     将 Top N 仓库写入 Notion 数据库。
-    自动查找或创建 'Daily AI Digest' 数据库。
+    优先使用 NOTION_DATABASE_ID 环境变量（直接定位，跳过 search/create）。
+    未设置时自动查找或创建 'Daily AI Digest' 数据库。
     返回是否成功写入至少一条。
     """
     if not NOTION_API_KEY:
         print("[SKIP] NOTION_API_KEY not set", file=sys.stderr)
         return False
 
-    # 1. 查找现有数据库
-    db_id = search_database()
+    # 0. 优先使用显式指定的数据库 ID（稳定、无需授权搜索）
+    db_id = os.environ.get("NOTION_DATABASE_ID", "").strip()
+    if db_id:
+        print(f"📝 Notion: 使用指定数据库 ID={db_id[:8]}…")
+    else:
+        # 1. 查找现有数据库
+        db_id = search_database()
 
-    # 2. 找不到则自动创建
-    if not db_id:
-        parent_id = find_parent_page()
-        if not parent_id:
-            print("[WARN] Notion: 未找到可用父页面，无法创建数据库", file=sys.stderr)
-            return False
-        db_id = create_database(parent_id)
+        # 2. 找不到则自动创建
         if not db_id:
-            return False
+            parent_id = find_parent_page()
+            if not parent_id:
+                print("[WARN] Notion: 未找到可用父页面，无法创建数据库", file=sys.stderr)
+                return False
+            db_id = create_database(parent_id)
+            if not db_id:
+                return False
 
     # 3. 写入 Top N 记录
     ok = 0

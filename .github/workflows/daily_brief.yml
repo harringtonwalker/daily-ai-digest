@@ -28,3 +28,4 @@ jobs:
           FEISHU_SECRET: ${{ secrets.FEISHU_SECRET }}         # 可选，飞书安全模式签名校验
           MEM0_API_KEY: ${{ secrets.MEM0_API_KEY }}
           NOTION_API_KEY: ${{ secrets.NOTION_API_KEY }}       # L3: Notion 数据库写入
+          NOTION_DATABASE_ID: ${{ secrets.NOTION_DATABASE_ID }} # L3: 直接指定数据库 ID（跳过 search，稳定）
