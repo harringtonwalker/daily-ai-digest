@@ -197,7 +197,7 @@ def build_summary_md(repos: list, news: list, action: str) -> str:
     return "**🧭 今日摘要**\n\n" + "\n".join(f"• {bullet}" for bullet in bullets[:4])
 
 
-def build_repo_watch_md(repos: list, detail_limit: int = 3) -> str:
+def build_repo_watch_md(repos: list, detail_limit: int = 5) -> str:
     if not repos:
         return "（今日暂无 GitHub 数据）"
 
@@ -210,16 +210,6 @@ def build_repo_watch_md(repos: list, detail_limit: int = 3) -> str:
         if desc:
             lines.append(f"   _{desc}_")
         lines.append("")
-
-    if len(repos) > detail_limit:
-        baseline = float(repos[detail_limit - 1].get("heat_score") or 0)
-        supplemental = [
-            repo for repo in repos[detail_limit:detail_limit + 2]
-            if float(repo.get("heat_score") or 0) >= max(6.0, baseline * 0.6)
-        ]
-        rest = " / ".join(f"#{repo['rank']} {repo['name']}" for repo in supplemental)
-        if rest:
-            lines.append(f"补充关注：{rest}")
 
     return "\n".join(lines).strip()
 
@@ -235,8 +225,13 @@ def build_news_watch_md(news: list, detail_limit: int = 3) -> str:
             f"{idx}. [{item['title']}]({article_url}) · [HN讨论]({item['hn_url']}) — 🔺{item['score']}分 · 💬{item['comments']}条"
         )
     if len(news) > detail_limit:
-        rest = " / ".join(shorten(item["title"], 18) for item in news[detail_limit:detail_limit + 2])
-        lines.extend(["", f"补充阅读：{rest}"])
+        supplemental = [
+            item for item in news[detail_limit:detail_limit + 2]
+            if int(item.get("relevance_score") or 0) >= 3 and int(item.get("score") or 0) >= 80
+        ]
+        if supplemental:
+            rest = " / ".join(shorten(item["title"], 18) for item in supplemental)
+            lines.extend(["", f"补充阅读：{rest}"])
     return "\n".join(lines)
 
 
@@ -302,7 +297,7 @@ def generate_insights(repos: list, news: list) -> tuple:
 def build_feishu_card(repos: list, news: list, insights: list, action: str) -> dict:
     """构建飞书 Interactive Card（含 GitHub 表格 + HN 新闻 + L2 洞察）"""
     summary_md = build_summary_md(repos, news, action)
-    gh_md = build_repo_watch_md(repos, detail_limit=3)
+    gh_md = build_repo_watch_md(repos, detail_limit=5)
     hn_md = build_news_watch_md(news, detail_limit=3)
     insight_md = build_judgement_md(insights)
 
