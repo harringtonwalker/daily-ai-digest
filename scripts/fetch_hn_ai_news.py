@@ -1,20 +1,79 @@
 #!/usr/bin/env python3
 """
-Fetch AI-related news from HackerNews Top Stories.
-No API key required. Filters by AI keywords.
+Fetch AI-related stories from HackerNews Top Stories.
+No API key required. Uses stricter matching to avoid obvious false positives.
 """
 import json
+import re
 import sys
 import urllib.request
+from urllib.parse import urlparse
 
 HN_TOPSTORIES = "https://hacker-news.firebaseio.com/v0/topstories.json"
 HN_ITEM = "https://hacker-news.firebaseio.com/v0/item/{}.json"
 HN_LINK = "https://news.ycombinator.com/item?id={}"
 
-AI_KEYWORDS = [
-    "ai", "llm", "gpt", "claude", "openai", "anthropic", "gemini",
-    "agent", "model", "deepseek", "mistral", "llama", "diffusion",
-    "neural", "machine learning", "deep learning", "chatgpt",
+STRONG_TITLE_PATTERNS = [
+    re.compile(pattern, re.IGNORECASE)
+    for pattern in [
+        r"\bllms?\b",
+        r"\bgpt(?:-\d+)?\b",
+        r"\brag\b",
+        r"\bchatgpt\b",
+        r"\bopenai\b",
+        r"\banthropic\b",
+        r"\bclaude\b",
+        r"\bgemini\b",
+        r"\bdeepseek\b",
+        r"\bmistral\b",
+        r"\bllama\b",
+        r"\bdiffusion\b",
+        r"\btransformers?\b",
+        r"\bmultimodal\b",
+        r"\bneural\b",
+        r"\binference\b",
+        r"\breasoning\b",
+        r"\bmachine learning\b",
+        r"\bdeep learning\b",
+        r"\blanguage models?\b",
+        r"\bfoundation models?\b",
+        r"\bcoding agents?\b",
+        r"\bai agents?\b",
+    ]
+]
+
+SUPPORTING_TITLE_PATTERNS = [
+    re.compile(pattern, re.IGNORECASE)
+    for pattern in [
+        r"\bai[- ]proof\b",
+        r"\bmcp\b",
+    ]
+]
+
+MODEL_TITLE_PATTERNS = [
+    re.compile(pattern, re.IGNORECASE)
+    for pattern in [
+        r"\bmoe\b",
+        r"\bparameter models?\b",
+        r"\bdeep learning\b",
+        r"\bmodels?\b",
+    ]
+]
+
+AI_HOST_PATTERNS = [
+    re.compile(pattern, re.IGNORECASE)
+    for pattern in [
+        r"(^|\.)openai\.com$",
+        r"(^|\.)anthropic\.com$",
+        r"(^|\.)huggingface\.co$",
+        r"(^|\.)replicate\.com$",
+        r"(^|\.)mistral\.ai$",
+        r"(^|\.)cohere\.com$",
+        r"(^|\.)deepseek\.com$",
+        r"(^|\.)ollama\.com$",
+        r"(^|\.)vllm\.ai$",
+        r"(^|\.)perplexity\.ai$",
+    ]
 ]
 
 
@@ -27,9 +86,20 @@ def fetch_url(url, timeout=10):
         return None
 
 
-def is_ai_related(title: str) -> bool:
-    t = title.lower()
-    return any(kw in t for kw in AI_KEYWORDS)
+def ai_relevance_score(title: str, url: str = "") -> int:
+    title = title or ""
+    host = urlparse(url).netloc.lower() if url else ""
+    score = 0
+
+    score += 3 * sum(1 for pattern in STRONG_TITLE_PATTERNS if pattern.search(title))
+    score += 3 * sum(1 for pattern in MODEL_TITLE_PATTERNS if pattern.search(title))
+    score += 2 * sum(1 for pattern in SUPPORTING_TITLE_PATTERNS if pattern.search(title))
+    score += 2 * sum(1 for pattern in AI_HOST_PATTERNS if pattern.search(host))
+    return score
+
+
+def is_ai_related(title: str, url: str = "") -> bool:
+    return ai_relevance_score(title, url) >= 3
 
 
 def fetch_hn_ai_news(limit: int = 5, scan: int = 200) -> list:
@@ -39,24 +109,25 @@ def fetch_hn_ai_news(limit: int = 5, scan: int = 200) -> list:
 
     results = []
     for story_id in ids[:scan]:
-        if len(results) >= limit:
-            break
         item = fetch_url(HN_ITEM.format(story_id))
         if not item:
             continue
         title = item.get("title", "")
-        if not is_ai_related(title):
+        url = item.get("url") or HN_LINK.format(story_id)
+        if not is_ai_related(title, url):
             continue
+        relevance_score = ai_relevance_score(title, url)
         results.append({
             "title": title,
-            "url": item.get("url") or HN_LINK.format(story_id),
+            "url": url,
             "hn_url": HN_LINK.format(story_id),
             "score": item.get("score", 0),
             "comments": item.get("descendants", 0),
+            "relevance_score": relevance_score,
             "id": story_id,
         })
 
-    results.sort(key=lambda x: x["score"], reverse=True)
+    results.sort(key=lambda x: (x["relevance_score"], x["score"], x["comments"]), reverse=True)
     return results[:limit]
 
 
