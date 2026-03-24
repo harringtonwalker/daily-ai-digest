@@ -45,11 +45,18 @@ STRONG_TITLE_PATTERNS = [
 SUPPORTING_TITLE_PATTERNS = [
     re.compile(pattern, re.IGNORECASE)
     for pattern in [
-        r"\bai\b",
         r"\bai[- ]proof\b",
         r"\bmcp\b",
+    ]
+]
+
+MODEL_TITLE_PATTERNS = [
+    re.compile(pattern, re.IGNORECASE)
+    for pattern in [
         r"\bmoe\b",
         r"\bparameter models?\b",
+        r"\bdeep learning\b",
+        r"\bmodels?\b",
     ]
 ]
 
@@ -85,13 +92,14 @@ def ai_relevance_score(title: str, url: str = "") -> int:
     score = 0
 
     score += 3 * sum(1 for pattern in STRONG_TITLE_PATTERNS if pattern.search(title))
+    score += 3 * sum(1 for pattern in MODEL_TITLE_PATTERNS if pattern.search(title))
     score += 2 * sum(1 for pattern in SUPPORTING_TITLE_PATTERNS if pattern.search(title))
     score += 2 * sum(1 for pattern in AI_HOST_PATTERNS if pattern.search(host))
     return score
 
 
 def is_ai_related(title: str, url: str = "") -> bool:
-    return ai_relevance_score(title, url) >= 2
+    return ai_relevance_score(title, url) >= 3
 
 
 def fetch_hn_ai_news(limit: int = 5, scan: int = 200) -> list:
