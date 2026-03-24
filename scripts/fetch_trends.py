@@ -20,6 +20,44 @@ TOPIC_TERMS = ["artificial-intelligence", "llm", "generative-ai", "ai-agent"]
 TRENDING_URL = "https://github.com/trending?since={period}"
 TRENDING_REPO_RE = re.compile(r'<h2[^>]*>\s*<a[^>]*href="/([^"/\s]+/[^"/\s]+)"', re.IGNORECASE | re.DOTALL)
 DEFAULT_EXCLUDED_REPOS = {"openclaw/openclaw"}
+STRONG_REPO_PATTERNS = [
+    re.compile(pattern, re.IGNORECASE)
+    for pattern in [
+        r"\bagents?\b",
+        r"\bagentic\b",
+        r"\bllms?\b",
+        r"\bgpt(?:-\d+)?\b",
+        r"\brag\b",
+        r"\bmcp\b",
+        r"\bclaude\b",
+        r"\bcodex\b",
+        r"\bgemini\b",
+        r"\bopenai\b",
+        r"\bdeepseek\b",
+        r"\bmistral\b",
+        r"\bllama\b",
+        r"\binference\b",
+        r"\bmultimodal\b",
+        r"\bcontext database\b",
+        r"\bdeep research\b",
+        r"\bcoding agents?\b",
+        r"\bai coding\b",
+        r"\bmodels?\b",
+        r"\bsuperagent\b",
+        r"\bsubagents?\b",
+    ]
+]
+WEAK_REPO_PATTERNS = [
+    re.compile(pattern, re.IGNORECASE)
+    for pattern in [
+        r"\bai\b",
+        r"\bautomation\b",
+        r"\bresearch\b",
+        r"\bmemory\b",
+        r"\bworkflow\b",
+        r"\bskills?\b",
+    ]
+]
 
 
 def gh_search(query, sort="stars", order="desc", per_page=30, token=None):
@@ -88,6 +126,21 @@ def trending_bonus(rank: int | None) -> float:
     return round(8.0 / math.sqrt(rank), 4)
 
 
+def repo_relevance_score(repo) -> int:
+    haystack = " | ".join(
+        part for part in [
+            repo.get("full_name", ""),
+            repo.get("name", ""),
+            repo.get("description", "") or "",
+        ]
+        if part
+    )
+    score = 0
+    score += 2 * sum(1 for pattern in STRONG_REPO_PATTERNS if pattern.search(haystack))
+    score += 1 * sum(1 for pattern in WEAK_REPO_PATTERNS if pattern.search(haystack))
+    return score
+
+
 def repo_heat_score(repo, now=None):
     now = now or datetime.now(timezone.utc)
     created_at = parse_github_dt(repo["created_at"])
@@ -150,6 +203,8 @@ def fetch_trending(period="weekly", limit=30, token=None):
                 or item.get("fork")
             ):
                 continue
+            if repo_relevance_score(item) < 2:
+                continue
             seen.add(name)
             item["trending_rank"] = trending_ranks.get(name)
             item["heat_score"] = repo_heat_score(item, now=now) + trending_bonus(item["trending_rank"])
@@ -160,6 +215,8 @@ def fetch_trending(period="weekly", limit=30, token=None):
             continue
         item = gh_repo(name, token=token)
         if not item or item.get("archived") or item.get("disabled") or item.get("fork"):
+            continue
+        if repo_relevance_score(item) < 2:
             continue
         seen.add(name)
         item["trending_rank"] = trending_ranks.get(name)
