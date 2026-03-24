@@ -163,6 +163,9 @@ def repo_badges(repo: dict) -> list:
     elif age <= 30:
         badges.append("30天内新项目")
 
+    if repo.get("trending_rank") and int(repo["trending_rank"]) <= 10:
+        badges.append(f"Trending#{repo['trending_rank']}")
+
     labels = theme_labels(
         detect_themes([repo.get("name", ""), repo.get("description") or ""]),
         top_n=1,
@@ -209,8 +212,14 @@ def build_repo_watch_md(repos: list, detail_limit: int = 3) -> str:
         lines.append("")
 
     if len(repos) > detail_limit:
-        rest = " / ".join(f"#{repo['rank']} {repo['name']}" for repo in repos[detail_limit:detail_limit + 2])
-        lines.append(f"补充关注：{rest}")
+        baseline = float(repos[detail_limit - 1].get("heat_score") or 0)
+        supplemental = [
+            repo for repo in repos[detail_limit:detail_limit + 2]
+            if float(repo.get("heat_score") or 0) >= max(6.0, baseline * 0.6)
+        ]
+        rest = " / ".join(f"#{repo['rank']} {repo['name']}" for repo in supplemental)
+        if rest:
+            lines.append(f"补充关注：{rest}")
 
     return "\n".join(lines).strip()
 

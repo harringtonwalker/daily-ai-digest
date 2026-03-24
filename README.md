@@ -15,8 +15,9 @@ GitHub Actions (cron: 0 3 * * *)
 ## 排名口径
 
 - GitHub 部分不是总 Stars 排行。
-- 当前口径是“近窗口活跃度 × 项目新鲜度”的热度榜，目标是减少老牌大仓长期霸榜。
+- 当前口径是“近窗口活跃度 × 项目新鲜度 + GitHub Trending 校准”的热度榜，目标是减少老牌大仓长期霸榜。
 - HN 部分使用更严格的 AI 关键词匹配，避免 `remain` / `aircraft` / `chain` 这类误判。
+- 默认排除 `openclaw/openclaw`，避免日报长期重复同一个项目。
 
 ## 日志位置
 
@@ -35,6 +36,7 @@ GitHub Actions (cron: 0 3 * * *)
 | `FEISHU_SECRET` | 飞书签名校验密钥（仅开启签名校验时填写）| 可选 |
 | `NOTION_API_KEY` | Notion Integration Token | ✅ |
 | `NOTION_DATABASE_ID` | Notion 数据库 ID（建议填写，避免搜索失败） | 建议 |
+| `GITHUB_EXCLUDED_REPOS` | 额外排除的仓库，逗号分隔，如 `foo/bar,baz/qux` | 可选 |
 
 `GITHUB_TOKEN` 由 Actions 自动注入，无需手动添加。
 
