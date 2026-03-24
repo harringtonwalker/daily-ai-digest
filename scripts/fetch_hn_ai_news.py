@@ -13,16 +13,12 @@ HN_TOPSTORIES = "https://hacker-news.firebaseio.com/v0/topstories.json"
 HN_ITEM = "https://hacker-news.firebaseio.com/v0/item/{}.json"
 HN_LINK = "https://news.ycombinator.com/item?id={}"
 
-AI_PATTERNS = [
+STRONG_TITLE_PATTERNS = [
     re.compile(pattern, re.IGNORECASE)
     for pattern in [
-        r"\bai\b",
-        r"\bai[- ]proof\b",
         r"\bllms?\b",
         r"\bgpt(?:-\d+)?\b",
         r"\brag\b",
-        r"\bmcp\b",
-        r"\bmoe\b",
         r"\bchatgpt\b",
         r"\bopenai\b",
         r"\banthropic\b",
@@ -41,9 +37,35 @@ AI_PATTERNS = [
         r"\bdeep learning\b",
         r"\blanguage models?\b",
         r"\bfoundation models?\b",
-        r"\bparameter models?\b",
         r"\bcoding agents?\b",
         r"\bai agents?\b",
+    ]
+]
+
+SUPPORTING_TITLE_PATTERNS = [
+    re.compile(pattern, re.IGNORECASE)
+    for pattern in [
+        r"\bai\b",
+        r"\bai[- ]proof\b",
+        r"\bmcp\b",
+        r"\bmoe\b",
+        r"\bparameter models?\b",
+    ]
+]
+
+AI_HOST_PATTERNS = [
+    re.compile(pattern, re.IGNORECASE)
+    for pattern in [
+        r"(^|\.)openai\.com$",
+        r"(^|\.)anthropic\.com$",
+        r"(^|\.)huggingface\.co$",
+        r"(^|\.)replicate\.com$",
+        r"(^|\.)mistral\.ai$",
+        r"(^|\.)cohere\.com$",
+        r"(^|\.)deepseek\.com$",
+        r"(^|\.)ollama\.com$",
+        r"(^|\.)vllm\.ai$",
+        r"(^|\.)perplexity\.ai$",
     ]
 ]
 
@@ -57,10 +79,19 @@ def fetch_url(url, timeout=10):
         return None
 
 
+def ai_relevance_score(title: str, url: str = "") -> int:
+    title = title or ""
+    host = urlparse(url).netloc.lower() if url else ""
+    score = 0
+
+    score += 3 * sum(1 for pattern in STRONG_TITLE_PATTERNS if pattern.search(title))
+    score += 2 * sum(1 for pattern in SUPPORTING_TITLE_PATTERNS if pattern.search(title))
+    score += 2 * sum(1 for pattern in AI_HOST_PATTERNS if pattern.search(host))
+    return score
+
+
 def is_ai_related(title: str, url: str = "") -> bool:
-    host = urlparse(url).netloc if url else ""
-    haystack = " | ".join(part for part in [title or "", host] if part)
-    return any(pattern.search(haystack) for pattern in AI_PATTERNS)
+    return ai_relevance_score(title, url) >= 2
 
 
 def fetch_hn_ai_news(limit: int = 5, scan: int = 200) -> list:
@@ -77,16 +108,18 @@ def fetch_hn_ai_news(limit: int = 5, scan: int = 200) -> list:
         url = item.get("url") or HN_LINK.format(story_id)
         if not is_ai_related(title, url):
             continue
+        relevance_score = ai_relevance_score(title, url)
         results.append({
             "title": title,
             "url": url,
             "hn_url": HN_LINK.format(story_id),
             "score": item.get("score", 0),
             "comments": item.get("descendants", 0),
+            "relevance_score": relevance_score,
             "id": story_id,
         })
 
-    results.sort(key=lambda x: (x["score"], x["comments"]), reverse=True)
+    results.sort(key=lambda x: (x["relevance_score"], x["score"], x["comments"]), reverse=True)
     return results[:limit]
 
 
