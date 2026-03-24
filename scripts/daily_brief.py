@@ -33,13 +33,22 @@ CST    = timezone(timedelta(hours=8))
 TODAY  = datetime.now(CST).strftime("%Y-%m-%d")
 NOW    = datetime.now(CST).strftime("%Y-%m-%d %H:%M CST")
 RUN_ID = f"{TODAY}-{uuid.uuid4().hex[:8]}"  # L1: 每次运行唯一 ID，用于审计追溯
-
-# L2 洞察关键词表
-TOPIC_KEYWORDS = [
-    "agent", "rag", "workflow", "fine-tun", "multimodal",
-    "reasoning", "code", "vision", "embed", "inference",
-    "mcp", "tool", "search", "voice", "image",
-]
+THEME_KEYWORDS = {
+    "agent": ["agent", "agentic", "tool", "assistant", "automation"],
+    "workflow": ["workflow", "orchestration", "pipeline", "n8n", "langflow"],
+    "multimodal": ["vision", "image", "video", "voice", "multimodal"],
+    "local": ["local", "offline", "on-device", "laptop", "tinybox"],
+    "research": ["reasoning", "inference", "moe", "benchmark", "model"],
+    "infra": ["rag", "search", "embed", "retrieval", "vector", "memory"],
+}
+THEME_LABELS = {
+    "agent": "智能体 / 工具调用",
+    "workflow": "工作流编排",
+    "multimodal": "多模态",
+    "local": "本地推理",
+    "research": "模型研究",
+    "infra": "RAG / 检索基础设施",
+}
 
 
 # ── 1. 数据获取 ──────────────────────────────────────────────
@@ -85,6 +94,149 @@ def fmt_num(n) -> str:
     return f"{n/1000:.1f}k" if n >= 1000 else str(n)
 
 
+def parse_iso_utc(value: str | None):
+    if not value:
+        return None
+    return datetime.fromisoformat(value.replace("Z", "+00:00"))
+
+
+def repo_age_days(repo: dict) -> int:
+    created_at = parse_iso_utc(repo.get("created_at"))
+    if not created_at:
+        return 9999
+    return max(int((datetime.now(timezone.utc) - created_at).total_seconds() // 86400), 0)
+
+
+def detect_themes(texts) -> Counter:
+    joined = " ".join(texts).lower()
+    counts = Counter()
+    for theme, keywords in THEME_KEYWORDS.items():
+        hits = sum(1 for keyword in keywords if keyword in joined)
+        if hits:
+            counts[theme] = hits
+    return counts
+
+
+def theme_labels(counter: Counter, top_n: int = 2) -> list:
+    return [THEME_LABELS[key] for key, _ in counter.most_common(top_n)]
+
+
+def pick_action_repo(repos: list, repo_themes: Counter, news_themes: Counter) -> tuple:
+    if not repos:
+        return None, "数据不足"
+
+    overlap = [theme for theme, _ in repo_themes.most_common() if theme in news_themes]
+    if overlap:
+        theme = overlap[0]
+        themed = [
+            repo for repo in repos
+            if theme in detect_themes([repo.get("name", ""), repo.get("description") or ""])
+        ]
+        if themed:
+            themed.sort(key=lambda repo: (-float(repo.get("heat_score") or 0), repo_age_days(repo)))
+            return themed[0], f"GitHub 与 HN 同时升温：{THEME_LABELS[theme]}"
+
+    fresh = [repo for repo in repos if repo_age_days(repo) <= 30]
+    if fresh:
+        fresh.sort(key=lambda repo: (-float(repo.get("heat_score") or 0), repo_age_days(repo)))
+        return fresh[0], "近30天新项目，且近24h热度靠前"
+
+    ranked = sorted(
+        repos,
+        key=lambda repo: (-float(repo.get("heat_score") or 0), -int(repo.get("stars") or 0)),
+    )
+    return ranked[0], "近24h综合热度最高"
+
+
+def shorten(text: str, limit: int = 42) -> str:
+    text = (text or "").strip()
+    if len(text) <= limit:
+        return text
+    return text[: limit - 1] + "…"
+
+
+def repo_badges(repo: dict) -> list:
+    badges = []
+    age = repo_age_days(repo)
+    if age <= 7:
+        badges.append("7天内新项目")
+    elif age <= 30:
+        badges.append("30天内新项目")
+
+    labels = theme_labels(
+        detect_themes([repo.get("name", ""), repo.get("description") or ""]),
+        top_n=1,
+    )
+    badges.extend(labels)
+    return badges[:2]
+
+
+def build_summary_md(repos: list, news: list, action: str) -> str:
+    bullets = []
+    repo_themes = detect_themes([f"{repo.get('name', '')} {repo.get('description') or ''}" for repo in repos])
+    news_themes = detect_themes([item.get("title", "") for item in news])
+
+    repo_labels = theme_labels(repo_themes, top_n=2)
+    if repo_labels:
+        bullets.append(f"主线：{' / '.join(repo_labels)}")
+
+    if repos:
+        fresh = sum(repo_age_days(repo) <= 30 for repo in repos)
+        bullets.append(f"新项目：Top{len(repos)} 中有 {fresh} 个近30天项目")
+
+    overlap = [THEME_LABELS[key] for key, _ in repo_themes.most_common() if key in news_themes]
+    if overlap:
+        bullets.append(f"共振：GitHub 与 HN 同时指向 {overlap[0]}")
+    elif news:
+        bullets.append(f"头条：{shorten(news[0]['title'], 34)}")
+
+    bullets.append(action.replace("建议深入：", "动作：").replace("建议关注：", "动作："))
+    return "**🧭 今日摘要**\n\n" + "\n".join(f"• {bullet}" for bullet in bullets[:4])
+
+
+def build_repo_watch_md(repos: list, detail_limit: int = 3) -> str:
+    if not repos:
+        return "（今日暂无 GitHub 数据）"
+
+    lines = ["**🔥 GitHub 重点项目**", ""]
+    for repo in repos[:detail_limit]:
+        meta = [f"⭐{fmt_num(repo['stars'])}", repo.get("language") or "N/A"]
+        meta.extend(repo_badges(repo))
+        lines.append(f"{repo['rank']}. [{repo['name']}]({repo['url']}) — {' · '.join(meta)}")
+        desc = shorten(repo.get("description") or "", 46)
+        if desc:
+            lines.append(f"   _{desc}_")
+        lines.append("")
+
+    if len(repos) > detail_limit:
+        rest = " / ".join(f"#{repo['rank']} {repo['name']}" for repo in repos[detail_limit:detail_limit + 2])
+        lines.append(f"补充关注：{rest}")
+
+    return "\n".join(lines).strip()
+
+
+def build_news_watch_md(news: list, detail_limit: int = 3) -> str:
+    if not news:
+        return "（今日暂无 HN AI 新闻）"
+
+    lines = ["**📰 HN 重点新闻**", ""]
+    for idx, item in enumerate(news[:detail_limit], 1):
+        article_url = item.get("url") or item["hn_url"]
+        lines.append(
+            f"{idx}. [{item['title']}]({article_url}) · [HN讨论]({item['hn_url']}) — 🔺{item['score']}分 · 💬{item['comments']}条"
+        )
+    if len(news) > detail_limit:
+        rest = " / ".join(shorten(item["title"], 18) for item in news[detail_limit:detail_limit + 2])
+        lines.extend(["", f"补充阅读：{rest}"])
+    return "\n".join(lines)
+
+
+def build_judgement_md(insights: list) -> str:
+    if not insights:
+        return "（今日暂无判断）"
+    return "**📌 今日判断**\n\n" + "\n".join(f"• {item}" for item in insights)
+
+
 def generate_insights(repos: list, news: list) -> tuple:
     """
     生成 3 条规则推断的洞察 + 1 条建议行动。
@@ -93,42 +245,43 @@ def generate_insights(repos: list, news: list) -> tuple:
     """
     insights = []
 
-    # 洞察 1：语言格局
-    langs = [r.get("language") for r in repos if r.get("language")]
-    if langs:
-        top_lang, top_count = Counter(langs).most_common(1)[0]
-        others = len(repos) - top_count
-        insights.append(
-            f"语言格局：Top{len(repos)} 中 **{top_lang}** 占 {top_count} 席"
-            + (f"，其余 {others} 席多语言并存" if others > 0 else "，一语独大")
-        )
+    repo_texts = [f"{repo.get('name', '')} {repo.get('description') or ''}" for repo in repos]
+    repo_themes = detect_themes(repo_texts)
+    news_themes = detect_themes([item.get("title", "") for item in news])
 
-    # 洞察 2：技术热词聚焦方向
-    all_text = " ".join(
-        (r.get("description") or "") + " " + r.get("name", "")
-        for r in repos
-    ).lower()
-    hot = [kw for kw in TOPIC_KEYWORDS if kw in all_text]
-    if hot:
-        insights.append(f"热门方向：{'  ·  '.join(hot[:4])}")
+    # 洞察 1：榜单新鲜度
+    if repos:
+        fresh = sum(repo_age_days(repo) <= 30 for repo in repos)
+        if fresh:
+            insights.append(f"新鲜度：Top{len(repos)} 中有 {fresh} 个项目创建于近30天，发现价值高于纯总星榜")
+        else:
+            insights.append(f"成熟度：Top{len(repos)} 暂无近30天新项目，今天更适合看“活跃变化”而不是追新")
 
-    # 洞察 3：HN 最热信号
-    if news:
-        top = news[0]
-        insights.append(
-            f"HN 最热：「{top['title'][:38]}…」🔺{top['score']}分·💬{top['comments']}条"
-        )
+    # 洞察 2：GitHub 主线主题
+    repo_labels = theme_labels(repo_themes, top_n=2)
+    if repo_labels:
+        insights.append(f"GitHub 主线：{' / '.join(repo_labels)}")
     elif repos:
-        top_repo = repos[0]
-        insights.append(
-            f"GitHub #1：{top_repo['name']} ⭐{fmt_num(top_repo['stars'])}，今日最强信号"
-        )
+        langs = [repo.get("language") for repo in repos if repo.get("language")]
+        if langs:
+            top_lang, top_count = Counter(langs).most_common(1)[0]
+            insights.append(f"语言分布：Top{len(repos)} 中 {top_lang} 占 {top_count} 席")
+
+    # 洞察 3：HN 与 GitHub 是否共振
+    overlap = [THEME_LABELS[key] for key, _ in repo_themes.most_common() if key in news_themes]
+    news_labels = theme_labels(news_themes, top_n=2)
+    if overlap:
+        insights.append(f"HN 共振：GitHub 与新闻同时指向 {overlap[0]}")
+    elif news and news_labels:
+        insights.append(f"HN 信号：今天讨论更偏 {news_labels[0]}")
+    elif news:
+        top = news[0]
+        insights.append(f"HN 最热：「{top['title'][:38]}…」🔺{top['score']}分·💬{top['comments']}条")
 
     # 建议行动
-    if repos and hot:
-        action = f"建议深入：{repos[0]['name']}（#{repos[0]['rank']}，主题 {hot[0]}）"
-    elif repos:
-        action = f"建议关注：{repos[0]['name']}（⭐{fmt_num(repos[0]['stars'])}，今日 #1）"
+    repo, reason = pick_action_repo(repos, repo_themes, news_themes)
+    if repo:
+        action = f"建议深入：{repo['name']}（{reason}）"
     else:
         action = "数据不足，建议次日补采"
 
@@ -139,32 +292,10 @@ def generate_insights(repos: list, news: list) -> tuple:
 
 def build_feishu_card(repos: list, news: list, insights: list, action: str) -> dict:
     """构建飞书 Interactive Card（含 GitHub 表格 + HN 新闻 + L2 洞察）"""
-
-    # GitHub 趋势表格（L1: url 可追溯）
-    gh_rows = "\n".join(
-        f"| {r['rank']} | [{r['name']}]({r['url']}) | "
-        f"⭐{fmt_num(r['stars'])} | {r.get('language') or 'N/A'} | "
-        f"{(r.get('description') or '')[:38]} |"
-        for r in repos
-    )
-    gh_md = (
-        "**🔥 GitHub AI 热门项目 Top 5（日榜）**\n\n"
-        "| # | 仓库 | Stars | 语言 | 描述 |\n"
-        "|---|---|---|---|---|\n" + gh_rows
-    ) if repos else "（今日暂无 GitHub 数据）"
-
-    # HN 新闻（L1: hn_url 可追溯）
-    hn_lines = "\n".join(
-        f"{i}. [{n['title']}]({n['hn_url']}) — 🔺{n['score']}分 · 💬{n['comments']}条"
-        for i, n in enumerate(news, 1)
-    )
-    hn_md = (
-        "**📰 AI 今日大事 (HackerNews)**\n\n" + hn_lines
-    ) if news else "（今日暂无 HN AI 新闻）"
-
-    # L2 洞察
-    ins_lines = "\n".join(f"• {s}" for s in insights) if insights else "（洞察生成中）"
-    insight_md = f"**🔍 今日洞察**\n\n{ins_lines}\n\n💡 {action}"
+    summary_md = build_summary_md(repos, news, action)
+    gh_md = build_repo_watch_md(repos, detail_limit=3)
+    hn_md = build_news_watch_md(news, detail_limit=3)
+    insight_md = build_judgement_md(insights)
 
     # Footer（L1: run_id 可追溯）
     footer_md = (
@@ -184,6 +315,8 @@ def build_feishu_card(repos: list, news: list, insights: list, action: str) -> d
                 "template": "blue",
             },
             "elements": [
+                {"tag": "div", "text": {"tag": "lark_md", "content": summary_md}},
+                {"tag": "hr"},
                 {"tag": "div", "text": {"tag": "lark_md", "content": gh_md}},
                 {"tag": "hr"},
                 {"tag": "div", "text": {"tag": "lark_md", "content": hn_md}},
@@ -244,7 +377,7 @@ def store_to_mem0(repos: list, news: list, insights: list, action: str) -> bool:
     insight_text = "; ".join(insights) if insights else "无"
 
     content = (
-        f"{TODAY} GitHub AI日榜Top3: {top3_repos}。"
+        f"{TODAY} GitHub AI热度榜Top3: {top3_repos}。"
         f"HN热议: {top3_news}。"
         f"洞察: {insight_text}。"
         f"建议: {action}"
@@ -318,13 +451,21 @@ def main():
 
     print("📨 发送飞书卡片...")
     card = build_feishu_card(repos, news, insights, action)
-    send_feishu(card)
+    failures = []
+    if not send_feishu(card):
+        failures.append("飞书")
 
     print("🧠 存入 Mem0 长期记忆（L1+L2）...")
-    store_to_mem0(repos, news, insights, action)
+    if not store_to_mem0(repos, news, insights, action):
+        failures.append("Mem0")
 
     print("📝 写入 Notion 数据库（L3）...")
-    log_to_notion(repos)
+    if not log_to_notion(repos):
+        failures.append("Notion")
+
+    if failures:
+        print(f"❌ 下游步骤失败：{', '.join(failures)}", file=sys.stderr)
+        sys.exit(1)
 
     print(f"✅ Daily AI Digest 完成 | run_id={RUN_ID}")
 
