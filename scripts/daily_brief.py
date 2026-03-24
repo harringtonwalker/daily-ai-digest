@@ -214,7 +214,7 @@ def build_repo_watch_md(repos: list, detail_limit: int = 5) -> str:
     return "\n".join(lines).strip()
 
 
-def build_news_watch_md(news: list, detail_limit: int = 3) -> str:
+def build_news_watch_md(news: list, detail_limit: int = 5) -> str:
     if not news:
         return "（今日暂无 HN AI 新闻）"
 
@@ -224,14 +224,6 @@ def build_news_watch_md(news: list, detail_limit: int = 3) -> str:
         lines.append(
             f"{idx}. [{item['title']}]({article_url}) · [HN讨论]({item['hn_url']}) — 🔺{item['score']}分 · 💬{item['comments']}条"
         )
-    if len(news) > detail_limit:
-        supplemental = [
-            item for item in news[detail_limit:detail_limit + 2]
-            if int(item.get("relevance_score") or 0) >= 3 and int(item.get("score") or 0) >= 80
-        ]
-        if supplemental:
-            rest = " / ".join(shorten(item["title"], 18) for item in supplemental)
-            lines.extend(["", f"补充阅读：{rest}"])
     return "\n".join(lines)
 
 
@@ -298,7 +290,7 @@ def build_feishu_card(repos: list, news: list, insights: list, action: str) -> d
     """构建飞书 Interactive Card（含 GitHub 表格 + HN 新闻 + L2 洞察）"""
     summary_md = build_summary_md(repos, news, action)
     gh_md = build_repo_watch_md(repos, detail_limit=5)
-    hn_md = build_news_watch_md(news, detail_limit=3)
+    hn_md = build_news_watch_md(news, detail_limit=5)
     insight_md = build_judgement_md(insights)
 
     # Footer（L1: run_id 可追溯）
